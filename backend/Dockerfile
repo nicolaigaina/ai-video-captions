@@ -16,4 +16,5 @@ RUN mkdir -p data/temp data/output
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--timeout", "600", "--workers", "2", "app:create_app()"]
+# 1 worker: JobStorage is per-process in-memory, so 2 workers 404 on each other's jobs.
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--timeout", "600", "--workers", "1", "app:create_app()"]

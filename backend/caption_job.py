@@ -18,7 +18,8 @@ import time
 logger = logging.getLogger(__name__)
 
 # Default Whisper model size; override via env var to trade speed vs accuracy.
-_WHISPER_MODEL_SIZE = os.environ.get("WHISPER_MODEL_SIZE", "base")
+# "base" often mis-decodes Hindi audio into Urdu script; "small" doesn't.
+_WHISPER_MODEL_SIZE = os.environ.get("WHISPER_MODEL_SIZE", "small")
 
 
 # ---------------------------------------------------------------------------

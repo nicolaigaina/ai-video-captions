@@ -22,6 +22,7 @@ class ScriptConfig:
     font_scale: float         # Size reduction vs Latin display fonts (1.0 = no reduction)
     is_rtl: bool = False
     system_font_path: str | None = None  # For hooks (PIL file-path based rendering)
+    font_family: str = "Noto Sans"  # Fontconfig family name for libass (ASS Style)
 
 
 SCRIPT_REGISTRY: dict[str, ScriptConfig] = {
@@ -38,38 +39,44 @@ SCRIPT_REGISTRY: dict[str, ScriptConfig] = {
         languages=frozenset({"ru", "uk", "bg", "sr", "mk", "be", "kk", "ky", "mn", "tg"}),
         char_width_ratio=0.85,  # IBM Plex Sans Bold UPPERCASE
         font_scale=0.50,
+        font_family="Noto Sans",
     ),
     "cjk": ScriptConfig(
         languages=frozenset({"zh", "ja", "ko"}),
         char_width_ratio=1.05,  # Full-width ideographs
         font_scale=0.65,
         system_font_path="/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        font_family="Noto Sans CJK SC",
     ),
     "arabic": ScriptConfig(
         languages=frozenset({"ar", "ur", "fa"}),
         char_width_ratio=0.58,  # Heavy ligatures compress effective width
         font_scale=0.50,
         is_rtl=True,
-        system_font_path="/usr/share/fonts/truetype/ibm-plex/IBMPlexSansArabic-Regular.ttf",
+        system_font_path="/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+        font_family="Noto Sans Arabic",
     ),
     "devanagari": ScriptConfig(
         languages=frozenset({"hi", "mr", "ne", "sa"}),
         char_width_ratio=0.70,  # Wide conjuncts
         font_scale=0.50,
-        system_font_path="/usr/share/fonts/truetype/ibm-plex/IBMPlexSansDevanagari-Regular.ttf",
+        system_font_path="/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+        font_family="Noto Sans Devanagari",
     ),
     "thai": ScriptConfig(
         languages=frozenset({"th"}),
         char_width_ratio=0.62,  # Moderate width with tone marks
         font_scale=0.50,
-        system_font_path="/usr/share/fonts/truetype/ibm-plex/IBMPlexSansThai-Regular.ttf",
+        system_font_path="/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf",
+        font_family="Noto Sans Thai",
     ),
     "hebrew": ScriptConfig(
         languages=frozenset({"he", "yi"}),
         char_width_ratio=0.58,  # Relatively narrow
         font_scale=0.50,
         is_rtl=True,
-        system_font_path="/usr/share/fonts/truetype/ibm-plex/IBMPlexSansHebrew-Regular.ttf",
+        system_font_path="/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
+        font_family="Noto Sans Hebrew",
     ),
 }
 
@@ -107,6 +114,12 @@ def is_rtl_language(language: str) -> bool:
     """Check if the language is right-to-left."""
     _, config = get_script_config(language)
     return config.is_rtl
+
+
+def get_font_family(language: str) -> str:
+    """Fontconfig family name (libass) for the language's script."""
+    _, config = get_script_config(language)
+    return config.font_family
 
 
 def get_subtitle_layout(language: str, font_size: int = 105):

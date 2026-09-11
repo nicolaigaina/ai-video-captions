@@ -14,6 +14,7 @@ import pysubs2
 from caption_styles import get_caption_style, get_output_format
 from subtitle_utils import (
     escape_ass_text,
+    get_font_family,
     get_subtitle_layout,
     is_latin_language,
     is_rtl_language,
@@ -196,7 +197,8 @@ def generate_ass(
     if is_latin_language(language):
         new_style.fontname = style_config.font_name
     else:
-        new_style.fontname = style_config.font_name_fallback
+        # Script-specific Noto family, not the Latin-only style fallback font.
+        new_style.fontname = get_font_family(language)
 
     new_style.fontsize = int(style_config.font_size * font_scale * dimension_scale)
     new_style.primarycolor = _parse_ass_color(style_config.primary_color)
@@ -210,7 +212,10 @@ def generate_ass(
     new_style.marginl = int(40 * dimension_scale)
     new_style.marginr = int(40 * dimension_scale)
     new_style.marginv = int(play_res_y * caption_position / 100)
-    new_style.spacing = 0.5
+    # Letter-spacing forces libass's simple (non-HarfBuzz) shaper, which can't
+    # attach combining marks to a base — Devanagari/Arabic/etc. render as
+    # dotted-circle placeholders. Only safe for Latin script.
+    new_style.spacing = 0.5 if is_latin_language(language) else 0
 
     subs.styles[style_name] = new_style
 
@@ -282,8 +287,8 @@ def generate_ass(
             else:
                 text = " ".join(text_parts)
 
-            # Apply letter spacing if non-zero
-            if style_config.letter_spacing != 0:
+            # Apply letter spacing if non-zero (breaks combining-mark shaping, Latin only)
+            if style_config.letter_spacing != 0 and is_latin_language(language):
                 text = f"{{\\fsp{style_config.letter_spacing}}}{text}"
 
             event = pysubs2.SSAEvent(

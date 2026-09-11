@@ -1,8 +1,13 @@
 FROM python:3.11-slim
 
+# Noto fonts cover Devanagari/Arabic/Hebrew/Thai/CJK for burned-in subtitles.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     fonts-liberation \
+    fonts-noto-core \
+    fonts-noto-extra \
+    fonts-noto-cjk \
+    && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

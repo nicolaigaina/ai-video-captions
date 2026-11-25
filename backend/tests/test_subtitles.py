@@ -88,3 +88,44 @@ def test_generate_ass_landscape_dimensions(sample_transcript, output_path):
         content = f.read()
     assert "PlayResX: 1920" in content
     assert "PlayResY: 1080" in content
+
+
+def test_generate_ass_rtl_adds_direction_markers(output_path):
+    from subtitles import generate_ass
+
+    transcript = {
+        "language": "fa",
+        "segments": [
+            {
+                "start": 0.0,
+                "end": 2.0,
+                "text": "سلام دنیا",
+                "words": [
+                    {"word": "سلام", "start": 0.0, "end": 0.8},
+                    {"word": "دنیا", "start": 0.9, "end": 1.6},
+                ],
+            }
+        ],
+    }
+
+    result = generate_ass(
+        transcript,
+        0,
+        2.0,
+        output_path,
+        caption_style="hormozi",
+        language="fa",
+        video_width=1080,
+        video_height=1920,
+    )
+
+    assert result is True
+    with open(output_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # Depending on platform/build, RTL rendering uses either:
+    # - logical RTL markers (bidi-capable libass), or
+    # - visual-order fallback (bidi-missing libass, common on Windows)
+    has_bidi_markers = ("\u202b" in content and "\u202c" in content and "\u200f" in content)
+    has_visual_fallback = ("مالس" in content or "ایند" in content)
+    assert has_bidi_markers or has_visual_fallback

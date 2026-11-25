@@ -14,6 +14,13 @@ import sys
 
 import pysubs2
 
+try:
+    from arabic_reshaper import reshape as _arabic_reshape  # type: ignore[import]
+    from bidi.algorithm import get_display as _bidi_get_display  # type: ignore[import]
+except Exception:  # pragma: no cover - optional runtime dependency
+    _arabic_reshape = None
+    _bidi_get_display = None
+
 from caption_styles import get_caption_style, get_output_format
 from subtitle_utils import (
     escape_ass_text,
@@ -22,6 +29,37 @@ from subtitle_utils import (
     is_rtl_language,
     strip_emojis,
 )
+
+
+RTL_EMBED_START = "\u202b"  # Right-to-Left Embedding
+RTL_EMBED_END = "\u202c"    # Pop directional formatting
+RLM = "\u200f"              # Right-to-Left mark
+
+
+def _rtl_visual_fallback_enabled() -> bool:
+    """Whether to use visual-order RTL fallback for ASS rendering.
+
+    Some ffmpeg/libass builds (common on Windows) lack full bidi/shaping
+    support. In that case we pre-compose RTL text in visual order so burn-in
+    still appears readable.
+    """
+    override = os.environ.get("ASS_RTL_VISUAL_FALLBACK", "").strip().lower()
+    if override in {"1", "true", "yes", "on"}:
+        return True
+    if override in {"0", "false", "no", "off"}:
+        return False
+    return sys.platform == "win32"
+
+
+def _shape_rtl_text_for_visual_fallback(text: str) -> str:
+    """Return visually-correct RTL text for renderers without bidi/shaping.
+
+    Preferred path uses arabic-reshaper + python-bidi. If unavailable, we keep
+    the older best-effort char reversal fallback.
+    """
+    if _arabic_reshape is not None and _bidi_get_display is not None:
+        return _bidi_get_display(_arabic_reshape(text))
+    return text[::-1]
 
 
 def _is_font_available(font_name: str) -> bool:
@@ -97,6 +135,7 @@ def generate_ass(
 
     # Prefer auto-detected language from transcript over caller's default
     language = transcript.get("language", language)
+    rtl_language = is_rtl_language(language)
 
     # ------------------------------------------------------------------
     # Extract and flatten words within the clip range
@@ -223,7 +262,11 @@ def generate_ass(
     style_name = "Default"
     new_style = pysubs2.SSAStyle()
 
-    if is_latin_language(language):
+    if rtl_language:
+        # Force a known Arabic-script-capable system font on Windows.
+        # This avoids broken shaping/isolated glyph fallbacks with display fonts.
+        new_style.fontname = "Tahoma" if sys.platform == "win32" else style_config.font_name_fallback
+    elif is_latin_language(language):
         new_style.fontname = style_config.font_name
     else:
         # The configured fallback family (e.g. "IBM Plex Sans") is not always
@@ -255,11 +298,47 @@ def generate_ass(
     # ---- animation settings ----
     highlight_color = style_config.highlight_color
     animation_type = style_config.animation_type
+    rtl_visual_fallback = rtl_language and _rtl_visual_fallback_enabled()
+
+    def _format_word_for_display(raw_word: str) -> str:
+        """Prepare one word for ASS text with stable bidi behaviour."""
+        text_word = raw_word if rtl_language else raw_word.upper()
+        if rtl_visual_fallback:
+            text_word = _shape_rtl_text_for_visual_fallback(text_word)
+        escaped = escape_ass_text(text_word)
+        if rtl_language and not rtl_visual_fallback:
+            # Wrap each token so inline ASS tags do not break RTL ordering.
+            return f"{RLM}{escaped}{RLM}"
+        return escaped
 
     # ------------------------------------------------------------------
     # Generate per-word subtitle events
     # ------------------------------------------------------------------
-    for _, line_end, word_list in subtitles:
+    for line_start, line_end, word_list in subtitles:
+        if rtl_visual_fallback:
+            # In visual fallback mode, per-word styling often breaks Arabic
+            # shaping/joining on some libass builds. Render one fully-shaped
+            # event per subtitle group for readability.
+            lines: dict[int, list[str]] = {}
+            for w, _, _, line_idx in word_list:
+                lines.setdefault(line_idx, []).append(w)
+
+            rendered_lines: list[str] = []
+            for line_idx in sorted(lines.keys()):
+                raw_line = " ".join(lines[line_idx])
+                shaped_line = _shape_rtl_text_for_visual_fallback(raw_line)
+                rendered_lines.append(escape_ass_text(shaped_line))
+
+            text = "\\N".join(rendered_lines)
+            event = pysubs2.SSAEvent(
+                start=pysubs2.make_time(s=line_start),
+                end=pysubs2.make_time(s=line_end),
+                text=text,
+                style=style_name,
+            )
+            subs.events.append(event)
+            continue
+
         for idx, (word, word_start, _, _) in enumerate(word_list):
             # Event end = next word's start, or line end for last word
             if idx < len(word_list) - 1:
@@ -271,57 +350,76 @@ def generate_ass(
             text_parts: list[str] = []
             prev_line_idx = None
 
-            for i, (w, w_start, w_end, line_idx) in enumerate(word_list):
+            indexed_words = [
+                (i, w, w_start, w_end, line_idx)
+                for i, (w, w_start, w_end, line_idx) in enumerate(word_list)
+            ]
+
+            if rtl_visual_fallback:
+                # Reorder words per visual line for renderers without bidi.
+                display_sequence: list[tuple[int, str, float, float, int]] = []
+                line_ids = sorted({line_idx for _, _, _, _, line_idx in indexed_words})
+                for line_id in line_ids:
+                    line_items = [item for item in indexed_words if item[4] == line_id]
+                    line_items.reverse()
+                    display_sequence.extend(line_items)
+            else:
+                display_sequence = indexed_words
+
+            for original_idx, w, w_start, w_end, line_idx in display_sequence:
                 # Line break when moving to a new display line
                 if prev_line_idx is not None and line_idx != prev_line_idx:
                     text_parts.append("\\N")
 
-                w_display = w.upper()
-                w_upper = escape_ass_text(w_display)
+                w_display = _format_word_for_display(w)
 
-                if i == idx:
+                if original_idx == idx:
                     # Current word — apply style-specific highlight
                     word_color = highlight_color
 
                     if animation_type == "karaoke":
-                        if is_rtl_language(language):
-                            text_parts.append(f"{{\\c{word_color}}}{w_upper}{{\\r}}")
+                        if rtl_language:
+                            text_parts.append(f"{{\\c{word_color}}}{w_display}{{\\r}}")
                         else:
                             duration_cs = (
                                 int((w_end - w_start) * 100) if w_end > w_start else 30
                             )
                             text_parts.append(
-                                f"{{\\kf{duration_cs}\\c{word_color}}}{w_upper}{{\\r}}"
+                                f"{{\\kf{duration_cs}\\c{word_color}}}{w_display}{{\\r}}"
                             )
                     elif animation_type == "scale":
                         text_parts.append(
-                            f"{{\\fscx110\\fscy110\\c{word_color}}}{w_upper}{{\\r}}"
+                            f"{{\\fscx110\\fscy110\\c{word_color}}}{w_display}{{\\r}}"
                         )
                     elif animation_type == "bounce":
                         bounce_pct = 120 if font_scale >= 1.0 else 112
                         text_parts.append(
                             f"{{\\t(0,50,\\fscx{bounce_pct}\\fscy{bounce_pct})"
                             f"\\t(50,100,\\fscx100\\fscy100)"
-                            f"\\c{word_color}}}{w_upper}{{\\r}}"
+                            f"\\c{word_color}}}{w_display}{{\\r}}"
                         )
                     else:
                         # Default highlight: simple colour change
-                        text_parts.append(f"{{\\c{word_color}}}{w_upper}{{\\r}}")
+                        text_parts.append(f"{{\\c{word_color}}}{w_display}{{\\r}}")
                 else:
                     # Not currently speaking — default style colour
-                    text_parts.append(w_upper)
+                    text_parts.append(w_display)
 
                 prev_line_idx = line_idx
 
             # Join words with spacing
-            if style_config.word_spacing != 100:
+            if style_config.word_spacing != 100 and not rtl_language:
                 space = f"{{\\fscx{style_config.word_spacing}}} {{\\fscx100}}"
                 text = space.join(text_parts)
             else:
                 text = " ".join(text_parts)
 
+            if rtl_language and not rtl_visual_fallback:
+                # Force line paragraph direction to RTL for libass bidi.
+                text = f"{RTL_EMBED_START}{text}{RTL_EMBED_END}"
+
             # Apply letter spacing if non-zero
-            if style_config.letter_spacing != 0:
+            if style_config.letter_spacing != 0 and not rtl_language:
                 text = f"{{\\fsp{style_config.letter_spacing}}}{text}"
 
             event = pysubs2.SSAEvent(

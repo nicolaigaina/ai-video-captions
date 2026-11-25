@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getCaptionJobById } from "~/actions/captions";
+import { getCaptionJobStatus } from "~/actions/captions";
 import { CaptionResultViewer } from "~/components/caption-result-viewer";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,9 @@ interface CaptionPageProps {
 
 export default async function CaptionPage({ params }: CaptionPageProps) {
   const { id } = await params;
-  const job = await getCaptionJobById(id);
+  // Use status fetch so this page always gets fresh backend progress
+  // instead of stale DB-only values.
+  const job = await getCaptionJobStatus(id);
   if (!job) notFound();
   return <CaptionResultViewer job={job} />;
 }

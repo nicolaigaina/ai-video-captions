@@ -1,9 +1,9 @@
-FROM node:20-alpine AS deps
+FROM mcr.microsoft.com/devcontainers/javascript-node:1-20-bookworm AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM node:20-alpine AS builder
+FROM mcr.microsoft.com/devcontainers/javascript-node:1-20-bookworm AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -11,7 +11,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npx prisma generate
 RUN npm run build
 
-FROM node:20-alpine AS runner
+FROM mcr.microsoft.com/devcontainers/javascript-node:1-20-bookworm AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

@@ -42,13 +42,26 @@ function getPhaseIndex(phase: CaptionPhase | null): number {
 
 export function ProcessingView({ jobId, onComplete, onError }: ProcessingViewProps) {
   const [job, setJob] = useState<CaptionJob | null>(null);
+  const [lastActivityAt, setLastActivityAt] = useState<number>(Date.now());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const prevProgressRef = useRef<number>(0);
+  const prevUpdatedAtRef = useRef<string | null>(null);
 
   useEffect(() => {
     async function poll() {
       const result = await getCaptionJobStatus(jobId);
       if (!result) return;
       setJob(result);
+
+      if (result.progress > prevProgressRef.current) {
+        prevProgressRef.current = result.progress;
+        setLastActivityAt(Date.now());
+      }
+
+      if (result.updatedAt !== prevUpdatedAtRef.current) {
+        prevUpdatedAtRef.current = result.updatedAt;
+        setLastActivityAt(Date.now());
+      }
 
       if (result.status === "completed") {
         if (intervalRef.current) clearInterval(intervalRef.current);
@@ -71,6 +84,8 @@ export function ProcessingView({ jobId, onComplete, onError }: ProcessingViewPro
   const currentPhase = job?.currentPhase ?? null;
   const progress = job?.progress ?? 0;
   const currentPhaseIndex = getPhaseIndex(currentPhase);
+  const stalled =
+    job?.status === "processing" && Date.now() - lastActivityAt > 90_000;
 
   if (job?.status === "failed") {
     return (
@@ -175,6 +190,12 @@ export function ProcessingView({ jobId, onComplete, onError }: ProcessingViewPro
           {progress}%
         </span>
       </div>
+
+      {stalled && (
+        <p className="text-center text-xs text-amber-500">
+          No backend activity was detected recently. Processing may be stalled.
+        </p>
+      )}
     </div>
   );
 }

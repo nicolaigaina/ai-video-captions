@@ -60,4 +60,6 @@ export interface BackendStatusResponse {
   durationSeconds: number | null;
   errorMessage: string | null;
   processingTimeMs: number | null;
+  createdAt?: string;
+  updatedAt?: string;
 }

@@ -41,6 +41,7 @@ class JobStorage:
         caption_position: int,
         original_filename: str,
         file_size: int,
+        requested_language: str | None = None,
     ) -> str:
         """Create a new job and return its UUID."""
         job_id = str(uuid.uuid4())
@@ -52,6 +53,7 @@ class JobStorage:
             "caption_position": caption_position,
             "original_filename": original_filename,
             "file_size": file_size,
+            "requested_language": requested_language,
             "status": "pending",
             "progress": 0,
             "current_phase": None,

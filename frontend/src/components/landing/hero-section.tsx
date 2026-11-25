@@ -7,21 +7,67 @@ import { VideoDropzone } from "~/components/video-dropzone";
 import { CaptionStylePicker } from "~/components/caption-style-picker";
 import { CaptionPreview } from "~/components/caption-preview";
 import { ProcessingView } from "~/components/processing-view";
-import { submitCaptionJob } from "~/actions/captions";
+import { createCaptionJobRecord } from "~/actions/captions";
 import {
   CAPTION_STYLE_CONFIGS,
   DEFAULT_CAPTION_STYLE,
   DEFAULT_CAPTION_POSITION,
 } from "~/lib/caption-styles";
+import { clientEnv } from "~/lib/env";
 import type { CaptionStyle } from "~/types/caption";
 
 type ViewState = "idle" | "uploading" | "processing" | "complete";
+type TranscriptionLanguage = "auto" | "fa" | "en";
 
 const trustIndicators = [
   { icon: Palette, text: "6 Styles" },
   { icon: Sparkles, text: "Word-Level" },
   { icon: Globe, text: "100+ Languages" },
 ];
+
+function uploadVideoToBackend(
+  formData: FormData,
+  onUploadProgress: (percent: number) => void,
+): Promise<{ backendJobId: string }> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `${clientEnv.NEXT_PUBLIC_BACKEND_URL}/api/process`);
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      const percent = Math.round((event.loaded / event.total) * 100);
+      onUploadProgress(Math.min(100, Math.max(0, percent)));
+    };
+
+    xhr.onerror = () => {
+      reject(new Error("Upload failed due to a network error."));
+    };
+
+    xhr.onabort = () => {
+      reject(new Error("Upload was aborted."));
+    };
+
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(xhr.responseText || `Backend error (${xhr.status})`));
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(xhr.responseText) as { jobId?: string };
+        if (!parsed.jobId) {
+          reject(new Error("Backend did not return jobId."));
+          return;
+        }
+        resolve({ backendJobId: parsed.jobId });
+      } catch {
+        reject(new Error("Invalid backend response."));
+      }
+    };
+
+    xhr.send(formData);
+  });
+}
 
 export function HeroSection() {
   const router = useRouter();
@@ -35,6 +81,14 @@ export function HeroSection() {
     DEFAULT_CAPTION_POSITION,
   );
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [transcriptionLanguage, setTranscriptionLanguage] =
+    useState<TranscriptionLanguage>(() => {
+      if (typeof navigator !== "undefined") {
+        const locale = navigator.language?.toLowerCase() ?? "";
+        if (locale.startsWith("fa")) return "fa";
+      }
+      return "auto";
+    });
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,29 +116,41 @@ export function HeroSection() {
     formData.append("captionStyle", selectedStyle);
     formData.append("captionPosition", String(captionPosition));
     formData.append("durationSeconds", String(fileDuration));
+    formData.append("transcriptionLanguage", transcriptionLanguage);
 
-    // Simulate upload progress while the server action runs
-    const progressInterval = setInterval(() => {
-      setUploadProgress((prev) => {
-        if (prev === null || prev >= 90) return prev;
-        return prev + 10;
+    try {
+      const uploadResult = await uploadVideoToBackend(formData, (percent) => {
+        setUploadProgress(percent);
       });
-    }, 300);
 
-    const result = await submitCaptionJob(formData);
-    clearInterval(progressInterval);
+      const createResult = await createCaptionJobRecord({
+        originalFileName: file.name,
+        fileSize: file.size,
+        durationSeconds: Number.isFinite(fileDuration) ? fileDuration : null,
+        captionStyle: selectedStyle,
+        captionPosition,
+        backendJobId: uploadResult.backendJobId,
+      });
 
-    if ("error" in result) {
-      setError(result.error);
+      if ("error" in createResult) {
+        setError(createResult.error);
+        setViewState("idle");
+        setUploadProgress(null);
+        return;
+      }
+
+      setUploadProgress(100);
+      setJobId(createResult.jobId);
+      setViewState("processing");
+      setUploadProgress(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Upload failed.";
+      setError(
+        `${message} Please try again. If backend already accepted the file, you can find it in History.`,
+      );
       setViewState("idle");
       setUploadProgress(null);
-      return;
     }
-
-    setUploadProgress(100);
-    setJobId(result.jobId);
-    setViewState("processing");
-    setUploadProgress(null);
   };
 
   const handleProcessingComplete = (completedJobId: string) => {
@@ -132,7 +198,7 @@ export function HeroSection() {
 
           {/* Main Heading */}
           <h1
-            className="animate-fade-up mb-6 text-5xl leading-tight font-bold md:text-6xl lg:text-7xl"
+            className="animate-fade-up mb-6 text-4xl leading-tight font-bold sm:text-5xl md:text-6xl lg:text-7xl"
             style={{ "--stagger": "0.1s" } as React.CSSProperties}
           >
             <span className="bg-gradient-to-r from-[#459F94] via-[#EDB118] to-[#459F94] bg-clip-text text-transparent">
@@ -202,6 +268,32 @@ export function HeroSection() {
                       selectedStyle={selectedStyle}
                       onStyleChange={setSelectedStyle}
                     />
+                    <div className="rounded-xl border border-gray-200 p-3 text-left dark:border-gray-800">
+                      <p className="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">
+                        Transcription language
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {([
+                          { id: "auto", label: "Auto" },
+                          { id: "fa", label: "Persian (FA)" },
+                          { id: "en", label: "English (EN)" },
+                        ] as const).map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => setTranscriptionLanguage(item.id)}
+                            className={[
+                              "rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
+                              transcriptionLanguage === item.id
+                                ? "border-[#459F94] bg-[#459F94]/10 text-[#459F94]"
+                                : "border-gray-200 text-gray-600 hover:border-[#459F94]/40 dark:border-gray-700 dark:text-gray-300",
+                            ].join(" ")}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
 
                   {/* Right: Caption Preview */}
@@ -222,7 +314,9 @@ export function HeroSection() {
                     disabled={!file || isUploading}
                     className="w-full rounded-xl bg-[#459F94] py-3.5 text-base font-semibold text-white transition-colors hover:bg-[#367d74] disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {isUploading ? "Uploading..." : "Generate Captions"}
+                    {isUploading
+                      ? `Uploading... ${Math.round(uploadProgress ?? 0)}%`
+                      : "Generate Captions"}
                   </button>
                 </div>
               </div>

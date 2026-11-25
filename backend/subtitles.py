@@ -9,6 +9,9 @@ Ported from autoshorts ``backend/clips/subtitles.py`` — only the core
 ``generate_ass`` function.  Transcription and burn-in live in ``caption_job.py``.
 """
 
+import os
+import sys
+
 import pysubs2
 
 from caption_styles import get_caption_style, get_output_format
@@ -19,6 +22,33 @@ from subtitle_utils import (
     is_rtl_language,
     strip_emojis,
 )
+
+
+def _is_font_available(font_name: str) -> bool:
+    """Best-effort check whether *font_name* resolves to an installed font.
+
+    On Windows we check the standard font registry (%SystemRoot%\\Fonts),
+    matching both the bare family name and the Plex-style family variants.
+    On POSIX systems libass typically falls back gracefully, so we keep the
+    original family name unless we can positively confirm it is installed.
+
+    Note: this is only used to pick a *fallback* family name for libass when a
+    font such as "IBM Plex Sans" is configured but not present on the system
+    (common on Windows). The ASS ``Fontname`` value is what libass matches, so
+    it must reference a font that actually exists.
+    """
+    if sys.platform == "win32":
+        fonts_dir = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
+        if not os.path.isdir(fonts_dir):
+            return False
+        try:
+            entries = set(os.listdir(fonts_dir))
+        except OSError:
+            return False
+        needle = font_name.lower().replace(" ", "")
+        stem_candidates = {e.split(".")[0].replace(" ", "").lower() for e in entries}
+        return any(needle in candidate for candidate in stem_candidates)
+    return True
 
 
 def generate_ass(
@@ -196,7 +226,15 @@ def generate_ass(
     if is_latin_language(language):
         new_style.fontname = style_config.font_name
     else:
+        # The configured fallback family (e.g. "IBM Plex Sans") is not always
+        # installed — especially on Windows, where libass has no match and the
+        # Arabic/Persian glyphs would render as blank / missing boxes. When we
+        # can confirm the configured fallback is absent, switch to a font known
+        # to ship with the OS and cover Arabic-script (Tahoma has full Arabic
+        # + Persian support and is always present on Windows/macOS).
         new_style.fontname = style_config.font_name_fallback
+        if not _is_font_available(style_config.font_name_fallback):
+            new_style.fontname = "Tahoma"
 
     new_style.fontsize = int(style_config.font_size * font_scale * dimension_scale)
     new_style.primarycolor = _parse_ass_color(style_config.primary_color)

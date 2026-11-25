@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Download, Trash2, Loader2 } from "lucide-react";
@@ -43,6 +43,16 @@ function formatDate(dateString: string): string {
 export function CaptionResultViewer({ job }: CaptionResultViewerProps) {
   const router = useRouter();
   const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    if (job.status !== "processing" && job.status !== "uploading") return;
+
+    const interval = setInterval(() => {
+      router.refresh();
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [job.status, router]);
 
   const styleConfig = CAPTION_STYLE_CONFIGS[job.captionStyle];
   const backendBaseUrl = clientEnv.NEXT_PUBLIC_BACKEND_URL;
@@ -113,19 +123,20 @@ export function CaptionResultViewer({ job }: CaptionResultViewerProps) {
     >
       {/* Top bar */}
       <div className="sticky top-0 z-10 border-b border-gray-200 bg-white/80 backdrop-blur-sm dark:border-gray-800 dark:bg-gray-950/80">
-        <div className="mx-auto flex max-w-6xl items-center gap-4 px-6 py-3">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-3 sm:gap-4 sm:px-6">
           {/* Back button */}
           <Link
             href="/history"
-            className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-gray-800 dark:hover:text-white"
+            aria-label="Back to history"
+            className="flex items-center gap-1.5 rounded-lg p-2 text-sm text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-gray-800 dark:hover:text-white sm:px-2 sm:py-1.5"
           >
             <ArrowLeft className="h-4 w-4" />
-            History
+            <span className="hidden sm:inline">History</span>
           </Link>
 
           {/* File name */}
           <p
-            className="flex-1 truncate text-sm font-medium text-gray-700 dark:text-gray-300"
+            className="min-w-0 flex-1 basis-full truncate text-sm font-medium text-gray-700 dark:text-gray-300 sm:basis-auto"
             title={job.originalFileName}
           >
             {job.originalFileName}
@@ -137,24 +148,26 @@ export function CaptionResultViewer({ job }: CaptionResultViewerProps) {
               <a
                 href={downloadUrl}
                 download={`captioned-${job.originalFileName}`}
-                className="flex items-center gap-1.5 rounded-lg bg-[#459F94] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#367d74]"
+                aria-label="Download captioned video"
+                className="flex items-center gap-1.5 rounded-lg bg-[#459F94] p-2 text-sm font-medium text-white transition-colors hover:bg-[#367d74] sm:px-3 sm:py-1.5"
               >
                 <Download className="h-4 w-4" />
-                Download
+                <span className="hidden sm:inline">Download</span>
               </a>
             )}
 
             <AlertDialog>
               <AlertDialogTrigger
                 disabled={isDeleting}
-                className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-500 transition-colors hover:bg-red-50 disabled:opacity-50 dark:border-red-700 dark:hover:bg-red-950"
+                aria-label="Delete this caption job"
+                className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-red-300 p-2 text-sm font-medium text-red-500 transition-colors hover:bg-red-50 disabled:opacity-50 dark:border-red-700 dark:hover:bg-red-950 sm:px-3 sm:py-1.5"
               >
                 {isDeleting ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <Trash2 className="h-4 w-4" />
                 )}
-                Delete
+                <span className="hidden sm:inline">Delete</span>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>

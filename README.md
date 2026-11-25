@@ -115,13 +115,13 @@ Copy `.env.example` to `.env` and adjust as needed:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `WHISPER_MODEL_SIZE` | `base` | Whisper model: `tiny`, `base`, `small`, `medium`, `large-v3` |
+| `WHISPER_MODEL_SIZE` | `medium` | Whisper model: `tiny`, `base`, `small`, `medium`, `large-v3` |
 | `MAX_FILE_SIZE_MB` | `500` | Maximum upload file size in MB |
 | `MAX_DURATION_MINUTES` | `30` | Maximum video duration |
 | `MAX_CONCURRENT_JOBS` | `2` | Simultaneous processing jobs |
 | `OUTPUT_TTL_HOURS` | `24` | Hours to keep output files before cleanup |
 
-Larger whisper models produce better transcriptions but require more RAM and processing time. `base` is a good default for most use cases.
+Larger whisper models produce better transcriptions but require more RAM and processing time. For Persian-heavy workloads, `medium` (or `large-v3` if RAM allows) is recommended.
 
 ## Tech Stack
 

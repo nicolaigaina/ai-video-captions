@@ -20,6 +20,7 @@ ALLOWED_EXTENSIONS = {".mp4", ".mov", ".webm"}
 # Caption position valid range (inclusive)
 CAPTION_POSITION_MIN = 5
 CAPTION_POSITION_MAX = 50
+ALLOWED_TRANSCRIPTION_LANGUAGES = {"auto", "fa", "en"}
 
 
 def _extension_allowed(filename: str) -> bool:
@@ -60,6 +61,9 @@ def create_app(testing: bool = False) -> Flask:
 
     app.config["STORAGE"] = storage
     app.config["DATA_DIR"] = data_dir
+
+    if not testing:
+        _recover_incomplete_jobs(storage)
 
     # ------------------------------------------------------------------
     # Output TTL cleanup
@@ -136,6 +140,17 @@ def create_app(testing: bool = False) -> Flask:
             except ValueError:
                 pass  # If unparseable, let it through — backend will determine during processing
 
+        # --- Optional forced transcription language ---
+        transcription_language = request.form.get("transcriptionLanguage", "auto").strip().lower()
+        if transcription_language not in ALLOWED_TRANSCRIPTION_LANGUAGES:
+            return jsonify({
+                "error": (
+                    "Invalid transcriptionLanguage. Allowed: "
+                    + ", ".join(sorted(ALLOWED_TRANSCRIPTION_LANGUAGES))
+                )
+            }), 400
+        requested_language = None if transcription_language == "auto" else transcription_language
+
         # --- Read file content and check size ---
         file_bytes = file.read()
         file_size = len(file_bytes)
@@ -161,6 +176,7 @@ def create_app(testing: bool = False) -> Flask:
             caption_position=caption_position,
             original_filename=file.filename,
             file_size=file_size,
+            requested_language=requested_language,
         )
 
         # --- Start background processing (skipped in test mode) ---
@@ -230,6 +246,24 @@ def create_app(testing: bool = False) -> Flask:
     return app
 
 
+def _recover_incomplete_jobs(storage: JobStorage) -> None:
+    """Mark jobs left active from a previous process as failed.
+
+    This prevents jobs from staying forever in "processing" after a backend
+    restart/crash and gives users a clear retry signal.
+    """
+    for job in storage.list_jobs():
+        if job.get("status") in {"pending", "processing"}:
+            storage.update_status(
+                job["job_id"],
+                status="failed",
+                error=(
+                    "Job interrupted by backend restart before completion. "
+                    "Please retry."
+                ),
+            )
+
+
 def _cleanup_old_outputs(data_dir: str, storage: JobStorage, ttl_hours: int) -> None:
     """Delete output directories (and their job records) older than ttl_hours."""
     output_dir = os.path.join(data_dir, "output")
@@ -282,6 +316,7 @@ def _start_processing_thread(app: Flask, job_id: str) -> None:
                     job["caption_style"],
                     job["caption_position"],
                     data_dir,
+                    forced_language=job.get("requested_language"),
                 )
             except Exception as exc:  # noqa: BLE001
                 storage.update_status(job_id, status="failed", error=str(exc))

@@ -1,6 +1,7 @@
-FROM python:3.11-slim
+FROM mcr.microsoft.com/devcontainers/python:1-3.11-bookworm
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN rm -f /etc/apt/sources.list.d/yarn.list /etc/apt/sources.list.d/nodesource.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     fonts-liberation \
     && rm -rf /var/lib/apt/lists/*

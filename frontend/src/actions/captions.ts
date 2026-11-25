@@ -45,6 +45,7 @@ function mapPrismaJobToType(job: {
 }
 
 const TERMINAL_STATUSES: CaptionJobStatus[] = ["completed", "failed"];
+const STALLED_JOB_THRESHOLD_MS = 10 * 60 * 1000;
 
 export async function submitCaptionJob(
   formData: FormData
@@ -104,6 +105,40 @@ export async function submitCaptionJob(
   }
 }
 
+interface CreateCaptionJobRecordInput {
+  originalFileName: string;
+  fileSize: number;
+  durationSeconds: number | null;
+  captionStyle: string;
+  captionPosition: number;
+  backendJobId: string;
+}
+
+export async function createCaptionJobRecord(
+  input: CreateCaptionJobRecordInput,
+): Promise<{ jobId: string } | { error: string }> {
+  try {
+    const prismaRecord = await db.captionJob.create({
+      data: {
+        originalFileName: input.originalFileName,
+        fileSize: input.fileSize,
+        durationSeconds: input.durationSeconds,
+        captionStyle: input.captionStyle,
+        captionPosition: input.captionPosition,
+        status: "processing",
+        progress: 0,
+        currentPhase: "uploading",
+        backendJobId: input.backendJobId,
+      },
+    });
+
+    return { jobId: prismaRecord.id };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return { error: message };
+  }
+}
+
 export async function getCaptionJobStatus(
   jobId: string
 ): Promise<CaptionJob | null> {
@@ -129,15 +164,28 @@ export async function getCaptionJobStatus(
 
     const backendData = (await response.json()) as BackendStatusResponse;
 
+    let resolvedStatus = backendData.status as CaptionJobStatus;
+    let resolvedError = backendData.errorMessage;
+
+    if (
+      resolvedStatus === "processing" &&
+      backendData.updatedAt &&
+      Date.now() - new Date(backendData.updatedAt).getTime() > STALLED_JOB_THRESHOLD_MS
+    ) {
+      resolvedStatus = "failed";
+      resolvedError =
+        "Processing appears stalled (no backend progress for 10+ minutes). Please retry.";
+    }
+
     const updated = await db.captionJob.update({
       where: { id: jobId },
       data: {
-        status: backendData.status as CaptionJobStatus,
+        status: resolvedStatus,
         progress: backendData.progress,
         currentPhase: backendData.currentPhase,
         language: backendData.language,
         durationSeconds: backendData.durationSeconds ?? job.durationSeconds,
-        errorMessage: backendData.errorMessage,
+        errorMessage: resolvedError,
         processingTimeMs: backendData.processingTimeMs,
       },
     });

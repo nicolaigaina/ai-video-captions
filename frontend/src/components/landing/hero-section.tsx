@@ -82,13 +82,7 @@ export function HeroSection() {
   );
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [transcriptionLanguage, setTranscriptionLanguage] =
-    useState<TranscriptionLanguage>(() => {
-      if (typeof navigator !== "undefined") {
-        const locale = navigator.language?.toLowerCase() ?? "";
-        if (locale.startsWith("fa")) return "fa";
-      }
-      return "auto";
-    });
+    useState<TranscriptionLanguage>("auto");
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 

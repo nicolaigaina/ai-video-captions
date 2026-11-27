@@ -155,7 +155,8 @@ export async function getCaptionJobStatus(
 
   try {
     const response = await fetch(
-      `${env.BACKEND_URL}/api/status/${job.backendJobId}`
+      `${env.BACKEND_URL}/api/status/${job.backendJobId}`,
+      { cache: "no-store" },
     );
 
     if (!response.ok) {
